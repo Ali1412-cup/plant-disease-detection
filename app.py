@@ -1,4 +1,3 @@
-
 import json, io, os
 import torch, timm
 import numpy as np
@@ -33,6 +32,15 @@ TREATMENTS = {
     "virus":   "Remove infected plants. Control insects.",
     "scorch":  "Ensure adequate watering. Avoid water stress.",
 }
+
+def clean_name(name):
+    # Converts "Apple___Apple_scab" → "Apple - Apple Scab"
+    parts = name.split("___")
+    if len(parts) == 2:
+        plant   = parts[0].replace("_", " ").title()
+        disease = parts[1].replace("_", " ").title()
+        return f"{plant} - {disease}"
+    return name.replace("_", " ").title()
 
 def get_treatment(name):
     for key, advice in TREATMENTS.items():
@@ -126,10 +134,10 @@ async def predict(file: UploadFile = File(...)):
     with torch.no_grad():
         probs = torch.softmax(model(tensor), dim=1)[0]
     top3_p, top3_i = torch.topk(probs, 3)
-    pred = CLASS_NAMES[top3_i[0].item()]
+    pred = clean_name(CLASS_NAMES[top3_i[0].item()])
     return {
         "disease":    pred,
         "confidence": round(top3_p[0].item()*100, 2),
         "treatment":  get_treatment(pred),
-        "top3": [{"disease": CLASS_NAMES[top3_i[i].item()], "probability": round(top3_p[i].item()*100,2)} for i in range(3)]
+        "top3": [{"disease": clean_name(CLASS_NAMES[top3_i[i].item()]), "probability": round(top3_p[i].item()*100,2)} for i in range(3)]
     }
