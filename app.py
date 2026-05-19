@@ -93,7 +93,7 @@ def home():
         </div>
         <div class="footer">
             BABA GURU NANAK UNIVERSITY<br>
-            Ali Haider | Ali Hassan | Fasi-Ur-Rehman | Aysha Hassan
+            Ali Haider | Fasi-Ur-Rehman | M.Hassan | Aysha Hassan
         </div>
         <script>
             function previewImg(e) {
