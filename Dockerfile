@@ -7,4 +7,4 @@ RUN pip install --upgrade pip setuptools wheel && \
     pip install fastapi==0.104.1 uvicorn==0.24.0 timm==0.9.12 \
     Pillow==10.4.0 python-multipart==0.0.6 numpy==1.26.4
 EXPOSE 8080
-CMD ["/bin/sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8080}"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
