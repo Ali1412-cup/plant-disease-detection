@@ -33,27 +33,21 @@ TREATMENTS = {
     "scorch":  "Ensure adequate watering. Avoid water stress.",
 }
 
-def clean_name(name):
-    # Converts "Apple___Apple_scab" → "Apple - Apple Scab"
-    parts = name.split("___")
-    if len(parts) == 2:
-        plant   = parts[0].replace("_", " ").title()
-        disease = parts[1].replace("_", " ").title()
-        return f"{plant} - {disease}"
-    return name.replace("_", " ").title()
 
-def get_treatment(name):
-    for key, advice in TREATMENTS.items():
-        if key in name.lower():
-            return advice
-    return "Consult a local agricultural expert."
 def format_class_name(raw: str) -> str:
-    """Convert 'Apple___Apple_scab' → 'Apple Scab'"""
     if "___" in raw:
-        disease_part = raw.split("___")[1]          # Take part after ___
+        disease_part = raw.split("___")[1]
     else:
         disease_part = raw
-    return disease_part.replace("_", " ").strip()   # Replace _ with space
+    return disease_part.replace("_", " ").strip().title()
+
+# Uses raw class name for reliable keyword matching
+def get_treatment(raw: str) -> str:
+    name_lower = raw.lower()
+    for key, advice in TREATMENTS.items():
+        if key in name_lower:
+            return advice
+    return "Consult a local agricultural expert."
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -74,11 +68,14 @@ def home():
             button:hover { background: #1B5E20; }
             button:disabled { background: #aaa; }
             #result { margin-top: 20px; padding: 20px; background: #E8F5E9; border-radius: 10px; display: none; }
+            #result.error-result { background: #FFEBEE; }
             .disease { font-size: 20px; font-weight: bold; color: #1B5E20; margin-bottom: 6px; }
+            .disease.error { color: #C62828; }
             .conf { color: #555; font-size: 14px; margin-bottom: 10px; }
             .treat { background: white; padding: 12px; border-radius: 8px; font-size: 14px; margin-bottom: 12px; }
             .top3-item { font-size: 13px; padding: 4px 0; color: #444; }
             .footer { text-align: center; color: #aaa; font-size: 12px; margin-top: 20px; }
+            #top3Label { font-size: 13px; }
         </style>
     </head>
     <body>
@@ -95,7 +92,7 @@ def home():
                 <div class="disease" id="diseaseName"></div>
                 <div class="conf"    id="confScore"></div>
                 <div class="treat"   id="treatment"></div>
-                <b style="font-size:13px">Top 3 Predictions:</b>
+                <b id="top3Label" style="font-size:13px; display:none">Top 3 Predictions:</b>
                 <div id="top3"></div>
             </div>
         </div>
@@ -119,14 +116,34 @@ def home():
                 try {
                     const res  = await fetch("/predict", { method: "POST", body: fd });
                     const data = await res.json();
-                    document.getElementById("diseaseName").innerText = "🌱 " + data.disease;
-                    document.getElementById("confScore").innerText   = "Confidence: " + data.confidence + "%";
-                    document.getElementById("treatment").innerText   = "💊 " + data.treatment;
-                    let html = "";
-                    const medals = ["🥇","🥈","🥉"];
-                    data.top3.forEach((x,i) => html += `<div class='top3-item'>${medals[i]} ${x.disease} — ${x.probability}%</div>`);
-                    document.getElementById("top3").innerHTML = html;
-                    document.getElementById("result").style.display = "block";
+
+                    const resultDiv   = document.getElementById("result");
+                    const diseaseEl   = document.getElementById("diseaseName");
+                    const top3Label   = document.getElementById("top3Label");
+                    const top3Div     = document.getElementById("top3");
+
+                    diseaseEl.innerText = data.disease;
+                    document.getElementById("confScore").innerText = "Confidence: " + data.confidence + "%";
+                    document.getElementById("treatment").innerText = data.treatment;
+
+                    // ✅ FIX 2: Only show Top 3 if it's a valid leaf image
+                    if (data.top3 && data.top3.length > 0) {
+                        let html = "";
+                        const medals = ["🥇","🥈","🥉"];
+                        data.top3.forEach((x,i) => html += `<div class='top3-item'>${medals[i]} ${x.disease} — ${x.probability}%</div>`);
+                        top3Div.innerHTML   = html;
+                        top3Label.style.display = "block";
+                        diseaseEl.classList.remove("error");
+                        resultDiv.classList.remove("error-result");
+                    } else {
+                        // Non-leaf image — hide top3, show red styling
+                        top3Div.innerHTML       = "";
+                        top3Label.style.display = "none";
+                        diseaseEl.classList.add("error");
+                        resultDiv.classList.add("error-result");
+                    }
+
+                    resultDiv.style.display = "block";
                 } catch(e) { alert("Error: " + e); }
                 finally { btn.disabled = false; btn.innerText = "🔍 Detect Disease"; }
             }
@@ -135,6 +152,9 @@ def home():
     </html>
     """
 
+# ✅ FIX 3: Confidence threshold rejects non-leaf images
+CONFIDENCE_THRESHOLD = 0.60  # 60% minimum to be considered a valid leaf
+
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
     img    = Image.open(io.BytesIO(await file.read())).convert("RGB")
@@ -142,10 +162,26 @@ async def predict(file: UploadFile = File(...)):
     with torch.no_grad():
         probs = torch.softmax(model(tensor), dim=1)[0]
     top3_p, top3_i = torch.topk(probs, 3)
-    pred = clean_name(CLASS_NAMES[top3_i[0].item()])
+
+    # Reject if confidence is too low (not a plant leaf)
+    if top3_p[0].item() < CONFIDENCE_THRESHOLD:
+        return {
+            "disease":    "❌ Not a Plant Leaf",
+            "confidence": round(top3_p[0].item() * 100, 2),
+            "treatment":  "⚠️ Please upload a clear photo of a plant leaf.",
+            "top3":       []   # Empty → JS hides the Top 3 section
+        }
+
+    raw_pred = CLASS_NAMES[top3_i[0].item()]
     return {
-        "disease":    pred,
-        "confidence": round(top3_p[0].item()*100, 2),
-        "treatment":  get_treatment(pred),
-        "top3": [{"disease": clean_name(CLASS_NAMES[top3_i[i].item()]), "probability": round(top3_p[i].item()*100,2)} for i in range(3)]
+        "disease":    format_class_name(raw_pred),       # e.g. "Apple Scab"
+        "confidence": round(top3_p[0].item() * 100, 2),
+        "treatment":  get_treatment(raw_pred),            # uses raw for correct lookup
+        "top3": [
+            {
+                "disease":     format_class_name(CLASS_NAMES[top3_i[i].item()]),
+                "probability": round(top3_p[i].item() * 100, 2)
+            }
+            for i in range(3)
+        ]
     }
