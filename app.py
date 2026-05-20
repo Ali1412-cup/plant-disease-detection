@@ -47,6 +47,14 @@ def get_treatment(name):
         if key in name.lower():
             return advice
     return "Consult a local agricultural expert."
+def format_class_name(raw: str) -> str:
+    """Convert 'Apple___Apple_scab' → 'Apple Scab'"""
+    if "___" in raw:
+        disease_part = raw.split("___")[1]          # Take part after ___
+    else:
+        disease_part = raw
+    return disease_part.replace("_", " ").strip()   # Replace _ with space
+
 
 @app.get("/", response_class=HTMLResponse)
 def home():
